@@ -7,6 +7,7 @@ from tensorflow.keras.layers import (
     Add,
     Concatenate,
     Conv2D,
+    Conv2DTranspose,
     Input,
     Lambda,
     LeakyReLU,
@@ -38,15 +39,20 @@ yolo_tiny_anchors = np.array([(10, 14), (23, 27), (37, 58),
 yolo_tiny_anchor_masks = np.array([[3, 4, 5], [0, 1, 2]])
 
 
-def DarknetConv(x, filters, size, strides=1, batch_norm=True):
-    if strides == 1:
+def DarknetConv(x, filters, size, strides=1, batch_norm=True, transpose=False):
+    if strides == 1 or transpose:
         padding = 'same'
     else:
         x = ZeroPadding2D(((1, 0), (1, 0)))(x)  # top left half-padding
         padding = 'valid'
-    x = Conv2D(filters=filters, kernel_size=size,
-               strides=strides, padding=padding,
-               use_bias=not batch_norm, kernel_regularizer=l2(0.0005))(x)
+    if transpose:
+        x = Conv2DTranspose(filters=filters, kernel_size=size,
+                   strides=strides, padding=padding,
+                   use_bias=not batch_norm, kernel_regularizer=l2(0.0005))(x)
+    else:
+        x = Conv2D(filters=filters, kernel_size=size,
+                   strides=strides, padding=padding,
+                   use_bias=not batch_norm, kernel_regularizer=l2(0.0005))(x)
     if batch_norm:
         x = BatchNormalization()(x)
         x = LeakyReLU(alpha=0.1)(x)
@@ -126,8 +132,7 @@ def YoloConvTiny(filters, name=None):
             x, x_skip = inputs
 
             # concat with skip connection
-            x = DarknetConv(x, filters, 1)
-            x = UpSampling2D(2)(x)
+            x = DarknetConv(x, filters, 2, strides = 2, transpose=True)
             x = Concatenate()([x, x_skip])
         else:
             x = inputs = Input(x_in.shape[1:])
@@ -188,17 +193,39 @@ def yolo_nms(outputs, anchors, masks, classes):
     class_probs = tf.concat(t, axis=1)
 
     scores = confidence * class_probs
-    nms_index = tf.image.non_max_suppression(
-        boxes = bbox,
-        scores = scores,
-        max_output_size = FLAGS.yolo_max_boxes,
-        iou_threshold = FLAGS.yolo_iou_threshold,
-        score_threshold = FLAGS.yolo_score_threshold
-    )
-    boxes = tf.gather(bbox, nms_index)
-    scores = tf.gather(scores, nms_index)
-    classes = tf.gather(classes, nms_index)
-    valid_detections = tf.size(nms_index)
+
+    all_boxes = tf.reshape(bbox, (-1, 4))
+    all_scores = tf.reshape(scores, (-1, tf.shape(scores)[-1]))
+    num_classes = classes
+    my_structure = [{'boxes': [], 'scores': [], 'classes': []}] * num_classes
+    all_classes = tf.argmax(all_scores, axis=1)
+    all_scores = tf.reduce_max(all_scores, axis=1)
+    print(all_classes.shape)
+    for i in range(tf.size(all_classes).run()):
+        c = all_classes[i]
+        my_structure[c]['boxes'].append(all_boxes[i])
+        my_structure[c]['scores'].append(all_scores[i])
+        my_structure[c]['classes'].append(tf.cast(c, tf.float32))
+    all_nms_index = []
+    boxes = [[]]
+    scores = [[]]
+    classes = [[]]
+    for c in range(num_classes):
+        nms_index = tf.image.non_max_suppression(
+            boxes = my_structure[c]['boxes'],
+            scores = my_structure[c]['scores'],
+            max_output_size = FLAGS.yolo_max_boxes,
+            iou_threshold = FLAGS.yolo_iou_threshold,
+            score_threshold = FLAGS.yolo_score_threshold
+        )
+        all_nms_index.extend(nms_index)
+        boxes[0].extend(tf.gather(my_structure[c]['boxes'], nms_index))
+        scores[0].extend(tf.gather(my_structure[c]['scores'], nms_index))
+        classes[0].extend(tf.gather(my_structure[c]['classes'], nms_index))
+    boxes = tf.convert_to_tensor(boxes, dtype=tf.float32)
+    scores = tf.convert_to_tensor(scores, dtype=tf.float32)
+    classes = tf.convert_to_tensor(classes, dtype=tf.float32)
+    valid_detections = tf.convert_to_tensor([tf.size(all_nms_index)], dtype=tf.int32)
 
     return boxes, scores, classes, valid_detections
 

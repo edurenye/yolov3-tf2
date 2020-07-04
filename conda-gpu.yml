@@ -4,11 +4,15 @@ dependencies:
   - python==3.7
   - pip
   - matplotlib
-  - opencv
   - cudnn
-  - cudatoolkit==10.1.243
   - pip:
-    - tensorflow-gpu==2.1.0rc1
+    - tensorflow-gpu>=2.2
+    - networkx>=1.11
+    - numpy>=1.12.0
+    - defusedxml>=0.5.0
+    - git+https://github.com/onnx/tensorflow-onnx
+    - https://dl.google.com/coral/python/tflite_runtime-2.1.0.post1-cp37-cp37m-linux_x86_64.whl
     - lxml
     - tqdm
     - -e .
+    - opencv-python>=4.2

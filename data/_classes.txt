@@ -1,0 +1,6 @@
+crosswalk
+dashed_crosswalk
+pedestrian_red
+pedestrian_green
+pedestrian_off
+traffic_light
